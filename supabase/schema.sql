@@ -83,20 +83,6 @@ $$;
 revoke all on function public.is_admin() from public, anon;
 grant execute on function public.is_admin() to authenticated;
 
--- Phone of the signed-in (OTP-verified) user in local Egyptian format (01xxxxxxxxx).
--- Supabase stores the phone as E.164 without "+": 201012345678  →  01012345678
-create or replace function public.auth_local_phone()
-returns text
-language sql stable
-as $$
-  select case
-    when p is null or p = '' then null
-    else '0' || right(regexp_replace(p, '\D', '', 'g'), 10)
-  end
-  from (select auth.jwt() ->> 'phone' as p) s;
-$$;
-grant execute on function public.auth_local_phone() to authenticated;
-
 -- ── students: keep updated_at fresh and protect immutable columns ─
 create or replace function public.students_before_update()
 returns trigger
@@ -104,7 +90,7 @@ language plpgsql
 as $$
 begin
   new.updated_at := now();
-  -- A signed-in student (non-admin) can never change identity columns.
+  -- Any signed-in non-admin can never change identity columns (defence in depth).
   if auth.uid() is not null and not public.is_admin() then
     if new.id is distinct from old.id
        or new.student_phone is distinct from old.student_phone

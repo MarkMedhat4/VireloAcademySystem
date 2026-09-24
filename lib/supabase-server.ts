@@ -28,12 +28,6 @@ export async function createServerSupabase() {
   });
 }
 
-/** Anonymous server client without any session (used to request OTP codes). */
-export function createAnonSupabase() {
-  const { url, anon } = publicEnv();
-  return createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
-}
-
 /**
  * Service-role client — BYPASSES Row Level Security. Server-only.
  * Only use it inside server actions after validating input, never with raw client data.

@@ -22,11 +22,6 @@ export function isValidPhone(value: string): boolean {
   return EG_MOBILE.test(value);
 }
 
-/** Local number → E.164 for Supabase phone auth (+201012345678). */
-export function toE164(localPhone: string): string {
-  return "+2" + localPhone;
-}
-
 const phoneField = (label: string) =>
   z
     .string({ required_error: `${label} مطلوب` })
@@ -134,8 +129,6 @@ export const paymentSchema = paymentBase
     proof_path: val.paid ? (val.proof_path ?? null) : null,
   }));
 export type PaymentInput = z.input<typeof paymentSchema>;
-
-export const otpSchema = z.string().trim().regex(/^\d{6,8}$/, "رمز التحقق غير صحيح");
 
 export const adminLoginSchema = z.object({
   identifier: z.string().trim().min(3, "أدخل اسم المستخدم").max(120),

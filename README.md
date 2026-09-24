@@ -2,7 +2,7 @@
 
 > **لا ننافس على الجودة. نقودها.** — *WE DON'T COMPETE ON QUALITY. WE LEAD IT.*
 
-A real, working web system for **Virelo Academy**: student registration, payment registration with proof-of-payment upload, an OTP-protected student portal, and an admin dashboard — built with **Next.js + TypeScript + Tailwind CSS** on **Supabase** (PostgreSQL, Auth, Storage, Row Level Security).
+A real, working web system for **Virelo Academy**: student registration, payment registration with proof-of-payment upload, an phone-based student portal, and an admin dashboard — built with **Next.js + TypeScript + Tailwind CSS** on **Supabase** (PostgreSQL, Auth, Storage, Row Level Security).
 
 Arabic / RTL-first (`<html lang="ar" dir="rtl">`), Cairo + Montserrat, Navy `#071A33` + Gold `#D4AF37` + White, following the Virelo Master Style System.
 
@@ -36,7 +36,7 @@ Arabic / RTL-first (`<html lang="ar" dir="rtl">`), Cairo + Montserrat, Navy `#07
 - **Home** — premium landing page with the three entry cards (registration, payment, student portal).
 - **`/register`** — student registration (name, phone, guardian name/phone, grade). Server-side validation, duplicate-phone protection, Arabic error messages.
 - **`/payment`** — lesson payment (50 EGP). **Payment instructions change instantly with the selected grade** (1st secondary → InstaPay only; 2nd secondary → InstaPay + Orange Cash). "Paid" requires a proof image (JPG/PNG/WEBP, ≤ 5 MB) uploaded to a **private** bucket. After a paid submission the student gets a **pre-filled WhatsApp message** to `01552481349`.
-- **`/student`** — student portal: phone → **SMS OTP** → view and edit own data (name, guardian name/phone, grade). The student's phone number is read-only.
+- **`/student`** — student portal: the student types their registered phone number and sees **only their own record**, which they can edit (name, guardian name/phone, grade). No OTP / SMS / authenticator app. The student's phone number itself is read-only.
 
 **Admin (`/admin`)**
 - Login with username (or email) + password through Supabase Auth; only accounts listed in `public.admins` get in.
@@ -54,7 +54,7 @@ Arabic / RTL-first (`<html lang="ar" dir="rtl">`), Cairo + Montserrat, Navy `#07
 | Styling | Tailwind CSS v4 + centralised tokens (`app/globals.css`, `design-system/tokens.ts`) |
 | Icons | Lucide (UI) + Simple Icons (brand glyphs) |
 | Fonts | Cairo (Arabic) + Montserrat (Latin/numbers) via Fontsource (self-hosted, no Google request) |
-| Backend | Supabase: PostgreSQL, Auth (password + phone OTP), Storage, RLS |
+| Backend | Supabase: PostgreSQL, Auth (admin password login), Storage, RLS |
 | Validation | Zod (shared by browser and server) |
 | Charts | Recharts |
 | Hosting | GitHub → Vercel, Supabase cloud |
@@ -67,7 +67,7 @@ virelo-academy-system/
 │   ├── layout.tsx            # <html lang="ar" dir="rtl">, navbar, footer
 │   ├── page.tsx              # Home
 │   ├── register/  payment/  student/  admin/
-│   ├── actions/              # Server actions: register, payment, student (OTP)
+│   ├── actions/              # Server actions: register, payment, student portal
 │   ├── admin/actions.ts      # Server actions: login/logout, signed proof URL, payment status
 │   ├── globals.css           # Design tokens + motion
 │   └── not-found.tsx, error.tsx, */loading.tsx
@@ -114,8 +114,7 @@ Both files are idempotent (safe to re-run).
 
 **4. Authentication.** *Authentication → Sign In / Providers*:
 - **Email** — enabled (admins sign in with email + password). Consider requiring email confirmation.
-- **Phone** — enable it and configure an **SMS provider** (Twilio, Twilio Verify, MessageBird, Vonage…). This is required for the student OTP.
-  - For development without paying for SMS, use *Phone → "Test Phone Numbers and OTPs"* to define fixed test numbers/codes.
+- **Phone** — *not needed*. The student portal does not use SMS or OTP, so no Twilio/SMS provider is required.
 - *URL Configuration* → set **Site URL** to your production URL (and add `http://localhost:3000` as an extra redirect URL for dev).
 
 **5. Create the two admin accounts** (there are exactly two administrators):
@@ -135,7 +134,7 @@ Both files are idempotent (safe to re-run).
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | Anon/publishable key. Safe only because RLS denies anonymous table access. Used to upload proofs to server-issued signed URLs. |
-| `SUPABASE_SERVICE_ROLE_KEY` | **NO — server only** | Bypasses RLS. Used inside server actions after validation (registration, payment, OTP eligibility check, admin username lookup). **Never** prefix with `NEXT_PUBLIC_`. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **NO — server only** | Bypasses RLS. Used inside server actions after validation (registration, payment, student portal, admin username lookup). Also the secret that signs the student-portal session cookie. **Never** prefix with `NEXT_PUBLIC_`. |
 | `NEXT_PUBLIC_SITE_URL` | yes | Canonical site URL (metadata) |
 
 ## Database
@@ -146,7 +145,7 @@ Both files are idempotent (safe to re-run).
 | `payments` | Payment declarations | `id, student_name, student_phone, sender_number, grade, amount (default 50), paid, status, proof_path, reviewed_at, created_at` |
 | `admins` | Which Auth users are administrators | `user_id → auth.users, username, full_name` |
 
-Integrity is enforced in the database too: Egyptian mobile format (`01[0125]xxxxxxxx`), the four allowed grades, name lengths, and "a *paid* payment must have a proof and a sender number". `students.updated_at` is maintained by a trigger, and a signed-in student can never change `student_phone`.
+Integrity is enforced in the database too: Egyptian mobile format (`01[0125]xxxxxxxx`), the four allowed grades, name lengths, and "a *paid* payment must have a proof and a sender number". `students.updated_at` is maintained by a trigger, and a signed-in non-admin can never change `student_phone`.
 
 ## Storage
 
@@ -155,12 +154,12 @@ Bucket **`payment-proofs`** — private, 5 MB, `image/jpeg | image/png | image/w
 ## Student flow
 
 ```text
-/register  →  /payment  →  upload proof  →  WhatsApp message  →  /student (OTP)
+/register  →  /payment  →  upload proof  →  WhatsApp message  →  /student (phone)
 ```
 1. **Register** — data validated in the browser (UX) and again on the server; stored with the service role because anonymous users have no table access.
 2. **Pay** — choose the grade → matching instructions appear. If *paid*: the browser asks the server for a one-time **signed upload URL**, uploads the image **directly to Supabase Storage** (avoids Vercel's 4.5 MB request limit), then the server verifies the object (exists, ≤ 5 MB, real image magic bytes) and inserts the payment with the **server-side price of 50 EGP**.
 3. **WhatsApp** — a button opens `wa.me/201552481349` with the message pre-filled (see below).
-4. **Portal** — phone → OTP → own record only (RLS).
+4. **Portal** — phone number → the server finds that one record and binds the browser to it with a signed, httpOnly cookie (30 min). Edits are applied to that record only.
 
 > **WhatsApp is not an automatic API message.** It opens WhatsApp with a ready text and the student must press *Send*. If you later connect the WhatsApp Business API, add a server-side integration (e.g. a Supabase Edge Function triggered on `payments` insert) — do not call it from the browser.
 
@@ -185,10 +184,10 @@ Payment status model: `لم يتم الدفع` (student said not paid) · `قي�
 
 ## Security
 
-- **RLS everywhere**: anonymous role has *no* privileges on `students`, `payments`, `admins`. Admin = row in `admins` (`is_admin()`); a student may read/update only the row whose phone equals the OTP-verified phone in their JWT.
+- **RLS everywhere**: anonymous role has *no* privileges on `students`, `payments`, `admins`. Admin = row in `admins` (`is_admin()`); students have **no direct table access**; the portal goes through server actions.
 - **Public writes go through server actions** (validate → rate-limit → insert with service role). Amount is a server constant; the client can't send a price. Honeypot field on public forms.
 - **Storage**: private bucket, signed upload URLs (server-issued), signed view URLs (admin only, 2 min), server-side magic-byte check, MIME + size limits at bucket level.
-- **Student auth = SMS OTP** (phone alone is *not* accepted). The OTP is only requested for registered numbers, and the response is identical for unknown numbers (no phone enumeration).
+- **Student portal = phone number only (by design, no OTP).** The server returns exactly one record per lookup, never a list; the browser is bound to that record by an HMAC-signed, httpOnly, SameSite cookie that expires after 30 minutes; edits use the id from that cookie, never from the request; lookups are rate-limited. Be aware that anyone who knows a student's phone number can open that student's record, so the page exposes only name, phones, guardian and grade. If you later need stronger protection, add OTP or a PIN.
 - **Admin auth**: Supabase Auth password login; generic error message; login rate limiting; `getUser()` server verification on every protected render/action (not just middleware).
 - **Secrets**: no passwords/keys in source; `.env.example` has placeholders only; service-role key is server-only.
 - **Headers**: `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS.
@@ -207,9 +206,9 @@ Payment status model: `لم يتم الدفع` (student said not paid) · `قي�
 - **Student name** must contain at least 3 words ("الاسم الرباعي"), letters only. Loosen in `lib/validation.ts` if needed.
 - **Sender number** is required only when the student selected *دفع*; optional otherwise.
 - **WhatsApp button** appears only after a *paid* submission (the message says "تم دفع").
-- **Student portal** always shows the same message after requesting a code (anti-enumeration) — students who mistype their number simply receive no code.
+- **Student portal** is phone-number-only as requested (no OTP/SMS). An unknown number gets a clear "not registered" message.
 - **Payments are not linked** to `students` by foreign key (the spec's payment form is independent of registration); they match by phone.
-- Phone numbers are **Egyptian mobiles** (`010/011/012/015`), stored as 11 digits and converted to `+20…` for OTP.
+- Phone numbers are **Egyptian mobiles** (`010/011/012/015`), stored as 11 digits.
 - Numbers/dates display with Latin digits (Montserrat), Gregorian calendar, Cairo time.
 - Arabic UI copy provided in the brief is used verbatim; any additional Arabic microcopy was written for this project and should get a native-speaker review.
 
@@ -217,7 +216,6 @@ Payment status model: `لم يتم الدفع` (student said not paid) · `قي�
 
 - [ ] Supabase project URL, anon key, service-role key (`.env.local` + Vercel)
 - [ ] Two admin Auth users + `admins` rows (UUIDs) — `supabase/seed.sql`
-- [ ] SMS provider for phone OTP (Twilio etc.) — or test numbers for staging
 - [ ] Official logo file (currently the supplied image)
 - [ ] Production Site URL in Supabase Auth + `NEXT_PUBLIC_SITE_URL`
 - [ ] Confirm the payment numbers in `lib/payment.ts`
@@ -227,14 +225,14 @@ Payment status model: `لم يتم الدفع` (student said not paid) · `قي�
 Run: `npm run typecheck && npm run lint && npm test && npm run build`.
 
 Verified in development:
-- ✅ TypeScript strict, ESLint, production build, 10 unit tests (validation, phone normalisation, paid/unpaid rules, per-grade payment instructions, WhatsApp message, CSV escaping, KPIs, search/filters, time series).
-- ✅ SQL (`schema.sql`, `policies.sql`) executed on a local PostgreSQL 16 with stubbed `auth`/`storage` schemas, including re-run idempotency and RLS behaviour: anon denied; student sees/updates only own row; phone change blocked; students can't read payments/admins; admin can read/update all; constraints reject bad phone / duplicate phone / paid-without-proof.
+- ✅ TypeScript strict, ESLint, production build, 11 unit tests (validation, phone normalisation, student session token, paid/unpaid rules, per-grade payment instructions, WhatsApp message, CSV escaping, KPIs, search/filters, time series).
+- ✅ SQL (`schema.sql`, `policies.sql`) executed on a local PostgreSQL 16 with stubbed `auth`/`storage` schemas, including re-run idempotency and RLS behaviour: anon denied; a signed-in non-admin sees nothing; admin can read/update all; constraints reject bad phone / duplicate phone / paid-without-proof.
 - ✅ Headless-Chromium checks on the built site: all routes render RTL, no horizontal overflow at 375/390/1280/1440 px, per-grade payment instructions (InstaPay-only vs InstaPay + Orange Cash), proof field appears only for *paid*, Arabic validation messages, focus moves to the first invalid field, mobile menu, footer links.
 - ✅ Admin dashboard UI (KPIs, charts, tables, search, filters) exercised with mock data.
 
-**Not verified (needs your Supabase project):** real signups/OTP delivery, actual Storage uploads, signed URLs, admin login against real Auth, and end-to-end RLS through the Supabase API. Follow the setup steps, then run through the checklist below.
+**Not verified (needs your Supabase project):** the student portal against the real database, actual Storage uploads, signed URLs, admin login against real Auth, and end-to-end RLS through the Supabase API. Follow the setup steps, then run through the checklist below.
 
-Manual acceptance checklist: register (valid / missing / duplicate / invalid phone) · pay for each grade (paid + unpaid, invalid file, WhatsApp text) · student portal (known / unknown phone, edit, save) · admin (login, logout, tables, search, filters, proof, status change, KPIs).
+Manual acceptance checklist: register (valid / missing / duplicate / invalid phone) · pay for each grade (paid + unpaid, invalid file, WhatsApp text) · student portal (known / unknown phone, edit, save, logout) · admin (login, logout, tables, search, filters, proof, status change, KPIs).
 
 ## Troubleshooting
 
@@ -242,8 +240,8 @@ Manual acceptance checklist: register (valid / missing / duplicate / invalid pho
 | --- | --- |
 | "الخدمة غير متاحة حالياً" on forms | Env vars missing/placeholder. Fill `.env.local` and restart `npm run dev`. |
 | Registration says data can't be saved | `schema.sql` not run, or wrong `SUPABASE_SERVICE_ROLE_KEY`. Check server logs. |
-| Student never receives the OTP | Phone provider/SMS not configured, number not registered, or SMS quota. Errors are logged server-side (`[sendStudentOtp]`) but deliberately not shown to users. Use *Test Phone Numbers* in Supabase for testing. |
-| "رمز التحقق غير صحيح" right after receiving it | Code expired (see Auth → Phone → OTP expiry) or already used — request a new one. |
+| Student portal says "لا توجد بيانات مسجلة بهذا الرقم" | The phone isn't in `students`, or was typed differently. The number is normalised (`+20…`, Arabic digits are accepted). |
+| Student portal says the session expired while saving | The 30-minute cookie expired — enter the phone number again. |
 | Admin login always fails | User not in `public.admins`, username not lower-case, wrong password, or `SUPABASE_SERVICE_ROLE_KEY` missing (needed to resolve username → email). You can also type the admin's email. |
 | Dashboard says "تعذر تحميل البيانات" | `policies.sql` not applied or the account isn't in `admins`. |
 | Proof upload fails | Bucket `payment-proofs` missing (run `schema.sql`), file > 5 MB, or not JPG/PNG/WEBP. |

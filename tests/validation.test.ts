@@ -124,3 +124,20 @@ test("time series are zero-filled", () => {
   assert.equal(m.length, 6);
   assert.equal(m.at(-1)!.amount, 50);
 });
+
+import { signToken, verifyToken } from "../lib/session-token";
+
+test("student session token: valid, tampered, expired, wrong secret", () => {
+  const secret = "test-secret";
+  const now = Date.now();
+  const t = signToken({ sid: "student-1", exp: now + 60_000 }, secret);
+  assert.equal(verifyToken(t, secret, now), "student-1");
+  assert.equal(verifyToken(t, "other-secret", now), null);
+  assert.equal(verifyToken(t, secret, now + 120_000), null); // expired
+  const [body, sig] = t.split(".");
+  const forged = Buffer.from(JSON.stringify({ sid: "student-2", exp: now + 60_000 })).toString("base64url");
+  assert.equal(verifyToken(`${forged}.${sig}`, secret, now), null); // payload swapped, signature reused
+  assert.equal(verifyToken(`${body}.x`, secret, now), null);
+  assert.equal(verifyToken(undefined, secret, now), null);
+  assert.equal(verifyToken("garbage", secret, now), null);
+});
