@@ -1,0 +1,22 @@
+-- ════════════════════════════════════════════════════════════════
+-- Virelo Academy System — administrator setup (TEMPLATE)
+--
+-- This file intentionally contains NO usernames, emails or passwords.
+--
+-- 1) Supabase Dashboard → Authentication → Users → "Add user" → "Create new user".
+--    Enter the admin's email + a strong password. Tick "Auto Confirm User".
+--    Do this once per administrator (there are exactly two).
+--    Keep the credentials in a password manager only.
+--
+-- 2) Copy each new user's UUID from the Users table.
+--
+-- 3) Replace the <PLACEHOLDERS> below, then run the statements in the SQL Editor.
+--    "username" is what the admin types on the /admin login screen (lower-case).
+-- ════════════════════════════════════════════════════════════════
+
+-- insert into public.admins (user_id, username, full_name) values
+--   ('<ADMIN-1-UUID>', '<admin-1-username-lowercase>', '<Admin 1 full name>'),
+--   ('<ADMIN-2-UUID>', '<admin-2-username-lowercase>', '<Admin 2 full name>');
+
+-- Verify:
+-- select user_id, username, full_name from public.admins;
