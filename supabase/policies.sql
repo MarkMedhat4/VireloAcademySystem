@@ -52,3 +52,34 @@ drop policy if exists payment_proofs_admin_delete on storage.objects;
 create policy payment_proofs_admin_delete on storage.objects
   for delete to authenticated
   using (bucket_id = 'payment-proofs' and (select public.is_admin()));
+
+-- ── Virelo Form Builder ─────────────────────────────────────────
+-- Same model as students/payments: anonymous visitors get NO direct table access at all.
+-- Public form pages and submissions are read/written through server actions using the
+-- service role, after the server checks the form is published (and, for submissions,
+-- validates every field). This keeps one consistent trust boundary across the whole app,
+-- rather than opening a second, narrower one just for forms.
+alter table public.forms          enable row level security;
+alter table public.form_fields    enable row level security;
+alter table public.form_responses enable row level security;
+
+revoke all on public.forms, public.form_fields, public.form_responses from anon;
+grant select, insert, update, delete on public.forms, public.form_fields, public.form_responses to authenticated;
+
+drop policy if exists forms_admin_all on public.forms;
+create policy forms_admin_all on public.forms
+  for all to authenticated
+  using ((select public.is_admin()))
+  with check ((select public.is_admin()));
+
+drop policy if exists form_fields_admin_all on public.form_fields;
+create policy form_fields_admin_all on public.form_fields
+  for all to authenticated
+  using ((select public.is_admin()))
+  with check ((select public.is_admin()));
+
+drop policy if exists form_responses_admin_all on public.form_responses;
+create policy form_responses_admin_all on public.form_responses
+  for all to authenticated
+  using ((select public.is_admin()))
+  with check ((select public.is_admin()));

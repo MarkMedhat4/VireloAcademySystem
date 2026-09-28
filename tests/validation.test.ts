@@ -141,3 +141,76 @@ test("student session token: valid, tampered, expired, wrong secret", () => {
   assert.equal(verifyToken(undefined, secret, now), null);
   assert.equal(verifyToken("garbage", secret, now), null);
 });
+
+import { emptyField, isValidSlug, slugify, validateResponse, type FormField } from "../lib/forms";
+
+test("slug validation and generation", () => {
+  assert.equal(isValidSlug("student-survey"), true);
+  assert.equal(isValidSlug("Student-Survey"), false);
+  assert.equal(isValidSlug("a b"), false);
+  assert.equal(isValidSlug("a"), false);
+  assert.equal(slugify("Programming Course Registration"), "programming-course-registration");
+});
+
+test("slugify falls back to a random slug for non-Latin titles", () => {
+  const slug = slugify("استمارة تسجيل الطلاب");
+  assert.ok(isValidSlug(slug));
+  assert.ok(slug.startsWith("form-"));
+});
+
+const mkField = (over: Partial<FormField>): FormField => ({
+  id: "1",
+  form_id: "f",
+  field_key: "f_name",
+  label: "الاسم",
+  type: "short_text",
+  placeholder: null,
+  description: null,
+  required: true,
+  validation: {},
+  options: null,
+  default_value: null,
+  sort_order: 0,
+  ...over,
+});
+
+test("validateResponse: required, email, phone, number range, choice membership", () => {
+  const fields: FormField[] = [
+    mkField({}),
+    mkField({ id: "2", field_key: "f_email", type: "email", required: false }),
+    mkField({ id: "3", field_key: "f_age", type: "number", required: true, validation: { min_value: 5, max_value: 99 } }),
+    mkField({ id: "4", field_key: "f_grade", type: "dropdown", required: true, options: ["A", "B"] }),
+    mkField({ id: "5", field_key: "f_hobbies", type: "checkbox_group", required: false, options: ["Chess", "Music"] }),
+    mkField({ id: "6", field_key: "f_heading", type: "section", required: false, label: "Section" }),
+  ];
+
+  const missing = validateResponse(fields, { f_email: "not-an-email", f_age: "3", f_grade: "C", f_hobbies: ["Chess", "Painting"] });
+  assert.equal(missing.ok, false);
+  assert.ok(missing.fieldErrors.f_name); // required, missing
+  assert.ok(missing.fieldErrors.f_email); // bad format
+  assert.ok(missing.fieldErrors.f_age); // below min
+  assert.ok(missing.fieldErrors.f_grade); // not in options
+  assert.ok(missing.fieldErrors.f_hobbies); // "Painting" not an option
+  assert.equal("f_heading" in missing.fieldErrors, false); // layout fields are never validated
+
+  const good = validateResponse(fields, { f_name: "Ahmed", f_email: "a@b.com", f_age: "20", f_grade: "A", f_hobbies: ["Chess"] });
+  assert.equal(good.ok, true);
+  assert.equal(good.data.f_name, "Ahmed");
+  assert.deepEqual(good.data.f_hobbies, ["Chess"]);
+  assert.equal("f_heading" in good.data, false);
+});
+
+test("validateResponse trims and rejects out-of-range lengths", () => {
+  const fields: FormField[] = [mkField({ validation: { min_length: 3, max_length: 5 } })];
+  assert.equal(validateResponse(fields, { f_name: "  ab  " }).ok, false); // trims to 2 chars, below min
+  assert.equal(validateResponse(fields, { f_name: "abcdef" }).ok, false); // above max
+  assert.equal(validateResponse(fields, { f_name: "abcd" }).ok, true);
+});
+
+test("emptyField gives choice types two starter options and a stable unique key", () => {
+  const a = emptyField("dropdown", 0);
+  const b = emptyField("dropdown", 1);
+  assert.equal(a.options?.length, 2);
+  assert.notEqual(a.field_key, b.field_key);
+  assert.equal(emptyField("divider", 0).options, null);
+});

@@ -20,13 +20,15 @@ Arabic / RTL-first (`<html lang="ar" dir="rtl">`), Cairo + Montserrat, Navy `#07
 8. [Storage](#storage)
 9. [Student flow](#student-flow)
 10. [Admin flow](#admin-flow)
-11. [Deployment (GitHub + Vercel)](#deployment-github--vercel)
-12. [Security](#security)
-13. [Design system & customization](#design-system--customization)
-14. [Assumptions & decisions](#assumptions--decisions)
-15. [Replace before launch](#replace-before-launch)
-16. [Testing & what was verified](#testing--what-was-verified)
-17. [Troubleshooting](#troubleshooting)
+11. [Form Builder](#form-builder)
+12. [Deployment (GitHub + Vercel)](#deployment-github--vercel)
+13. [Security](#security)
+14. [Design system & customization](#design-system--customization)
+15. [Assumptions & decisions](#assumptions--decisions)
+16. [Replace before launch](#replace-before-launch)
+17. [Testing & what was verified](#testing--what-was-verified)
+18. [Known limitations](#known-limitations)
+19. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -38,11 +40,17 @@ Arabic / RTL-first (`<html lang="ar" dir="rtl">`), Cairo + Montserrat, Navy `#07
 - **`/payment`** — lesson payment (50 EGP). **Payment instructions change instantly with the selected grade** (1st secondary → InstaPay only; 2nd secondary → InstaPay + Orange Cash). "Paid" requires a proof image (JPG/PNG/WEBP, ≤ 5 MB) uploaded to a **private** bucket. After a paid submission the student gets a **pre-filled WhatsApp message** to `01552481349`.
 - **`/student`** — student portal: the student types their registered phone number and sees **only their own record**, which they can edit (name, guardian name/phone, grade). No OTP / SMS / authenticator app. The student's phone number itself is read-only.
 
-**Admin (`/admin`)**
-- Login with username (or email) + password through Supabase Auth; only accounts listed in `public.admins` get in.
-- KPI cards, four Recharts charts (students by grade, payments by grade, daily payments, monthly revenue), students table, payments table.
-- Global search (Arabic-normalised), grade / status / date filters, sorting, pagination, CSV export.
+- **`/forms/<slug>`** — public dynamic forms created by the admins with the Form Builder (see [Form Builder](#form-builder)). One engine renders every form; drafts are never public.
+
+**The public site never links to the admin area.** The navbar, footer, home page and every student-facing page contain no "Admin" text or `/admin` link. `/admin` still exists and is protected by real authentication (hiding a link is not security). `robots.txt` disallows `/admin`, and every admin page sends `noindex`.
+
+**Admin (`/admin`, a separate experience with its own layout — no public navbar/footer)**
+- Login with username (or email) + password through Supabase Auth; only accounts listed in `public.admins` get in. Signed-in admins are sent to `/admin/dashboard`.
+- Routes: `/admin/dashboard`, `/admin/students`, `/admin/payments`, `/admin/forms`, `/admin/forms/create`, `/admin/forms/[id]`, `/admin/forms/[id]/responses`, `/admin/attendance` (placeholder), `/admin/settings` (basic).
+- Dashboard: KPI cards (students, payments, revenue, pending review, forms, form responses), four Recharts charts, recent forms, recent form responses, recent payments.
+- Students and Payments pages: Arabic-normalised search, grade / status / date filters, sorting, pagination, CSV export.
 - View a payment proof through a **2-minute signed URL**; confirm / reject payments.
+- **Form Builder**: create, edit, preview, publish, archive/restore, duplicate forms; view, search, filter and export responses.
 
 **Quality**: skeleton loading, empty states, Arabic errors, accessible forms (labels, focus, `aria-*`), 44 px touch targets, `prefers-reduced-motion`, responsive from 320 px, security headers.
 
@@ -66,19 +74,24 @@ virelo-academy-system/
 ├── app/
 │   ├── layout.tsx            # <html lang="ar" dir="rtl">, navbar, footer
 │   ├── page.tsx              # Home
-│   ├── register/  payment/  student/  admin/
-│   ├── actions/              # Server actions: register, payment, student portal
+│   ├── register/  payment/  student/
+│   ├── forms/[slug]/         # Public dynamic form page
+│   ├── actions/              # Server actions: register, payment, student portal, public forms
+│   ├── admin/page.tsx        # Login (redirects to /admin/dashboard when signed in)
+│   ├── admin/(shell)/        # Auth-guarded layout + dashboard, students, payments, forms/*, attendance, settings
 │   ├── admin/actions.ts      # Server actions: login/logout, signed proof URL, payment status
+│   ├── admin/forms-actions.ts# Server actions: form builder (admin only)
+│   ├── robots.ts             # Disallows /admin for crawlers
 │   ├── globals.css           # Design tokens + motion
 │   └── not-found.tsx, error.tsx, */loading.tsx
 ├── components/
 │   ├── ui/                   # Button, Card, Badge, Alert, Field, Skeleton, EmptyState
-│   ├── forms/                # RegisterForm, PaymentForm, PaymentInstructions, ProofUpload, StudentPortal
-│   ├── dashboard/            # AdminShell, AdminLogin, KpiCard, charts, ProofDialog
+│   ├── forms/                # RegisterForm, PaymentForm, StudentPortal, DynamicFormRenderer, PublicFormClient
+│   ├── dashboard/            # AdminChrome, views (dashboard/students/payments/forms/responses), form-builder/*
 │   ├── tables/               # DataTable, StudentsTable, PaymentsTable
-│   └── site/                 # Navbar, Footer, Logo, PageShell, brand icons
+│   └── site/                 # Navbar, Footer, SiteChrome (hides public chrome on /admin), Logo, PageShell
 ├── design-system/tokens.ts   # Colors, spacing, radii, motion
-├── lib/                      # config, validation, payment, analytics, csv, auth, supabase clients, env
+├── lib/                      # config, validation, forms (builder types + response validation), payment, analytics, csv, auth, supabase clients, env
 ├── supabase/                 # schema.sql, policies.sql, seed.sql (admin template)
 ├── public/logo/virelo-logo.jpeg   # Official logo (unaltered)
 ├── proxy.ts                  # Supabase session refresh (Next.js 16 "proxy", formerly middleware)
@@ -144,6 +157,9 @@ Both files are idempotent (safe to re-run).
 | `students` | Registered students | `id, student_name, student_phone (UNIQUE), guardian_name, guardian_phone, grade, created_at, updated_at` |
 | `payments` | Payment declarations | `id, student_name, student_phone, sender_number, grade, amount (default 50), paid, status, proof_path, reviewed_at, created_at` |
 | `admins` | Which Auth users are administrators | `user_id → auth.users, username, full_name` |
+| `forms` | Form Builder: one row per form | `id, name, title, description, slug (UNIQUE), status (draft/published/archived), settings (jsonb), created_by, created_at, updated_at, published_at` |
+| `form_fields` | Fields of a form | `id, form_id, field_key, label, type, placeholder, description, required, validation (jsonb), options (jsonb), default_value, sort_order` |
+| `form_responses` | Submissions (JSONB, keyed by `field_key`) | `id, form_id, submitted_at, response_data (jsonb), created_at` |
 
 Integrity is enforced in the database too: Egyptian mobile format (`01[0125]xxxxxxxx`), the four allowed grades, name lengths, and "a *paid* payment must have a proof and a sender number". `students.updated_at` is maintained by a trigger, and a signed-in non-admin can never change `student_phone`.
 
@@ -166,11 +182,46 @@ Bucket **`payment-proofs`** — private, 5 MB, `image/jpeg | image/png | image/w
 ## Admin flow
 
 ```text
-/admin login → Dashboard → Students → Payments → Payment proofs
+/admin login → Dashboard → Students → Payments (+ proofs) → Forms → Responses
 ```
 Username (or email) + password → server verifies with Supabase Auth **and** checks `public.admins`. Non-admin accounts are rejected. All admin data is read with the admin's own session, so RLS decides what is returned.
 
 Payment status model: `لم يتم الدفع` (student said not paid) · `قيد المراجعة` (paid, awaiting review — gold) · `مؤكد` (confirmed — green) · `مرفوض` (rejected — red). KPI "إجمالي المدفوعات المسجلة" counts paid, non-rejected payments.
+
+## Form Builder
+
+Admins can create any form from the dashboard without code. Every form, field and response lives in Supabase; **no table is created per form** — one dynamic engine renders all of them.
+
+### Migration / setup (existing projects)
+1. Open Supabase → **SQL Editor** and run the updated `supabase/schema.sql`, then `supabase/policies.sql` (both idempotent — safe to re-run; existing tables and data are untouched).
+2. No new environment variables are needed.
+3. Push to GitHub; Vercel redeploys automatically.
+
+### Create a form
+1. Sign in at `/admin` → **النماذج** → **+ إنشاء نموذج**.
+2. Fill **اسم النموذج** (internal), **العنوان** (shown to students), optional description and the **slug** (auto-suggested from a Latin title; edit it freely — lowercase letters, numbers and dashes; must be unique).
+3. **+ إضافة حقل** → pick a type, then edit it in the settings panel: label, placeholder, help text, required, min/max length (text) or min/max value (number), options (dropdown / radio / checkbox group), default value.
+4. Reorder with the up/down arrows, duplicate or delete fields from the row.
+5. **معاينة** shows the real public form (same renderer) without saving or submitting.
+6. **حفظ كمسودة** saves as a draft (not public).
+
+### Publish and share
+Click **نشر**. The public URL `https://<your-domain>/forms/<slug>` appears with **Copy Link**, **Open Form** and **Responses** buttons. Editing a published form uses **حفظ التغييرات** (status is unchanged). **أرشفة** stops responses (the public page then says the form no longer accepts responses) and keeps all data; **استعادة** returns it to draft.
+
+### View, search, filter, export responses
+`/admin/forms/<id>/responses` shows total / today / this week / last submission, then a table whose columns are generated from the form's fields. Search covers every value (Arabic-normalised), filter by date range, click **عرض** for the full response, and **تصدير CSV** exports the filtered rows using the real field labels as column headers. CSV opens directly in Excel (UTF-8 with BOM, formula-injection safe).
+
+### Duplicate
+**تكرار** copies the structure, fields, options and settings into a new draft (slug `<old>-copy`); responses are never copied.
+
+### Safe editing
+Responses are stored with their own snapshot keyed by an internal, stable `field_key` — never by label. Renaming, editing or deleting a field cannot damage historical responses (a removed field's old values simply stay stored).
+
+### Supported field types
+Short text, long text, number, phone, email, date, dropdown, radio, checkbox group, section/heading, divider. Required fields and formats are validated in the browser **and again on the server** (`lib/forms.ts → validateResponse`).
+
+### Form settings
+Each form stores `accept_responses` and a custom `success_message` (default: "تم إرسال بياناتك بنجاح. شكرًا لانضمامك إلى Virelo Academy."). The server enforces them; the builder UI does not yet expose editing controls for them (see limitations).
 
 ## Deployment (GitHub + Vercel)
 
@@ -188,6 +239,7 @@ Payment status model: `لم يتم الدفع` (student said not paid) · `قي�
 - **Public writes go through server actions** (validate → rate-limit → insert with service role). Amount is a server constant; the client can't send a price. Honeypot field on public forms.
 - **Storage**: private bucket, signed upload URLs (server-issued), signed view URLs (admin only, 2 min), server-side magic-byte check, MIME + size limits at bucket level.
 - **Student portal = phone number only (by design, no OTP).** The server returns exactly one record per lookup, never a list; the browser is bound to that record by an HMAC-signed, httpOnly, SameSite cookie that expires after 30 minutes; edits use the id from that cookie, never from the request; lookups are rate-limited. Be aware that anyone who knows a student's phone number can open that student's record, so the page exposes only name, phones, guardian and grade. If you later need stronger protection, add OTP or a PIN.
+- **Form Builder security**: `forms`, `form_fields`, `form_responses` have RLS enabled, no anonymous privileges, and one admin-only policy each. Public form pages and submissions run through server actions (service role) that re-check that the form is published and accepting responses and re-validate every field on the server — the browser is never trusted. Public visitors cannot read form configuration of unpublished forms or any responses. Verified with simulated roles in PostgreSQL (anon denied, non-admin sees nothing, admin full access).
 - **Admin auth**: Supabase Auth password login; generic error message; login rate limiting; `getUser()` server verification on every protected render/action (not just middleware).
 - **Secrets**: no passwords/keys in source; `.env.example` has placeholders only; service-role key is server-only.
 - **Headers**: `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS.
@@ -225,14 +277,34 @@ Payment status model: `لم يتم الدفع` (student said not paid) · `قي�
 Run: `npm run typecheck && npm run lint && npm test && npm run build`.
 
 Verified in development:
-- ✅ TypeScript strict, ESLint, production build, 11 unit tests (validation, phone normalisation, student session token, paid/unpaid rules, per-grade payment instructions, WhatsApp message, CSV escaping, KPIs, search/filters, time series).
-- ✅ SQL (`schema.sql`, `policies.sql`) executed on a local PostgreSQL 16 with stubbed `auth`/`storage` schemas, including re-run idempotency and RLS behaviour: anon denied; a signed-in non-admin sees nothing; admin can read/update all; constraints reject bad phone / duplicate phone / paid-without-proof.
+- ✅ TypeScript strict, ESLint, production build, 16 unit tests (validation, phone normalisation, student session token, form slugs, dynamic response validation, paid/unpaid rules, per-grade payment instructions, WhatsApp message, CSV escaping, KPIs, search/filters, time series).
+- ✅ SQL (`schema.sql`, `policies.sql`) executed on a local PostgreSQL 16 with stubbed `auth`/`storage` schemas, including re-run idempotency and RLS behaviour: anon denied; a signed-in non-admin sees nothing; admin can read/update all (including forms, fields and responses); constraints reject bad phone / duplicate phone / paid-without-proof.
 - ✅ Headless-Chromium checks on the built site: all routes render RTL, no horizontal overflow at 375/390/1280/1440 px, per-grade payment instructions (InstaPay-only vs InstaPay + Orange Cash), proof field appears only for *paid*, Arabic validation messages, focus moves to the first invalid field, mobile menu, footer links.
 - ✅ Admin dashboard UI (KPIs, charts, tables, search, filters) exercised with mock data.
 
 **Not verified (needs your Supabase project):** the student portal against the real database, actual Storage uploads, signed URLs, admin login against real Auth, and end-to-end RLS through the Supabase API. Follow the setup steps, then run through the checklist below.
 
 Manual acceptance checklist: register (valid / missing / duplicate / invalid phone) · pay for each grade (paid + unpaid, invalid file, WhatsApp text) · student portal (known / unknown phone, edit, save, logout) · admin (login, logout, tables, search, filters, proof, status change, KPIs).
+
+## Known limitations
+
+Be aware of what this version does **not** do (listed honestly so nothing is assumed to work):
+
+- **Attendance** (`/admin/attendance`) is a placeholder page — no attendance data model or UI exists yet.
+- **Settings** (`/admin/settings`) shows the account only; there are no editable system settings yet.
+- **Field types not implemented:** file upload, image upload, password, URL, time, date & time. ("Multiple choice" is the same as radio.)
+- **Field options not implemented:** "unique value" per field, regex/pattern validation.
+- **Form settings not implemented:** "require login", "allow multiple submissions" and "show submission date" toggles. `accept_responses` and `success_message` are enforced by the server but have no editor in the UI yet.
+- **Reordering** uses up/down buttons, not drag-and-drop. The builder is a two-column layout (fields list + settings panel), with a field-type picker dialog instead of a permanent left palette.
+- **No QR code** and **no separate Excel (.xlsx) or PDF export** — CSV only (opens in Excel).
+- **"View" action:** the form list has Edit / Responses / Open / Copy link / Duplicate / Archive; there is no separate read-only "View" page (Edit includes Preview).
+- **Existing hard-coded forms** (registration, payment, student portal) were **not** migrated to the Form Builder, by design (no safe automatic migration).
+- **Public-page redesign:** the navbar/footer were cleaned (no admin link) and the pages keep the existing premium design, but the larger UI overhaul in the brief (new hero copy, trust section, student-journey timeline, payment step flow, student dashboard cards, scroll-reveal animations) was **not** implemented in this pass.
+- **Not verified against a live Supabase project:** the Form Builder server actions, public submission and the admin screens with real data were type-checked, linted, unit-tested and the SQL/RLS were tested on local PostgreSQL, but the end-to-end flow (login → build → publish → submit → responses → export) has not been run against a real Supabase instance. Run the acceptance flow below after setup.
+- Rate limiting is in-memory per server instance (see Security).
+
+### Acceptance checklist for the Form Builder
+Admin login → **+ إنشاء نموذج** → fill info → add fields → configure → reorder → preview → save draft → publish → copy URL → open it in a private window → submit (also try missing required fields) → responses page shows it → search → date filter → open detail → export CSV → duplicate → archive (public page shows "no longer accepting") → restore.
 
 ## Troubleshooting
 
@@ -247,3 +319,6 @@ Manual acceptance checklist: register (valid / missing / duplicate / invalid pho
 | Proof upload fails | Bucket `payment-proofs` missing (run `schema.sql`), file > 5 MB, or not JPG/PNG/WEBP. |
 | Proof viewer says image unavailable | Storage policy `payment_proofs_admin_read` missing, or the file was deleted. |
 | Build fails on fonts | Fonts are bundled from npm (`@fontsource-variable/*`); run `npm install` again. |
+| Public form says "لا يوجد نموذج بهذا الرابط" | The form is still a draft, the slug is different, or `schema.sql` (forms tables) wasn't run. Publish it and copy the link from the builder. |
+| Admin dashboard fails after the update | Run the new `schema.sql` and `policies.sql` (forms tables + policies). |
+| Publishing says to add a field | A form needs at least one input field (headings and dividers don't count). |

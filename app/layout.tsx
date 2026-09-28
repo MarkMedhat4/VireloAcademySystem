@@ -2,8 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "@fontsource-variable/cairo/index.css";
 import "@fontsource-variable/montserrat/index.css";
 import "./globals.css";
-import { Navbar } from "@/components/site/navbar";
-import { Footer } from "@/components/site/footer";
+import { SiteChrome } from "@/components/site/site-chrome";
 import { SITE } from "@/lib/config";
 
 export const metadata: Metadata = {
@@ -37,11 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           تخطّي إلى المحتوى
         </a>
-        <Navbar />
-        <main id="main" className="flex-1">
-          {children}
-        </main>
-        <Footer />
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );

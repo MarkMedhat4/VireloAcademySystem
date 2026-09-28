@@ -114,3 +114,89 @@ on conflict (id) do update
   set public = false,
       file_size_limit = excluded.file_size_limit,
       allowed_mime_types = excluded.allowed_mime_types;
+
+-- ════════════════════════════════════════════════════════════════
+-- Virelo Form Builder — forms, form_fields, form_responses.
+-- One dynamic engine for every form: no new table is created per form.
+-- ════════════════════════════════════════════════════════════════
+
+do $$ begin
+  create type public.form_status as enum ('draft', 'published', 'archived');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type public.form_field_type as enum (
+    'short_text', 'long_text', 'number', 'phone', 'email', 'date',
+    'dropdown', 'radio', 'checkbox_group', 'section', 'divider'
+  );
+exception when duplicate_object then null; end $$;
+
+-- ── forms ───────────────────────────────────────────────────────
+create table if not exists public.forms (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null check (char_length(btrim(name)) between 2 and 150),
+  title        text not null check (char_length(btrim(title)) between 2 and 200),
+  description  text,
+  slug         text not null unique check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and char_length(slug) between 2 and 80),
+  status       public.form_status not null default 'draft',
+  settings     jsonb not null default '{"accept_responses": true, "success_message": "تم إرسال بياناتك بنجاح.\nشكرًا لانضمامك إلى Virelo Academy."}'::jsonb,
+  created_by   uuid references auth.users (id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  published_at timestamptz
+);
+create index if not exists forms_status_idx on public.forms (status);
+
+-- ── form_fields ─────────────────────────────────────────────────
+-- field_key is a stable internal id (independent of the editable label) so that renaming
+-- a label never breaks previously stored responses, which are keyed by field_key.
+create table if not exists public.form_fields (
+  id             uuid primary key default gen_random_uuid(),
+  form_id        uuid not null references public.forms (id) on delete cascade,
+  field_key      text not null check (field_key ~ '^[a-z0-9_]+$'),
+  label          text not null,
+  type           public.form_field_type not null,
+  placeholder    text,
+  description    text,
+  required       boolean not null default false,
+  validation     jsonb not null default '{}'::jsonb,
+  options        jsonb, -- string[] for dropdown / radio / checkbox_group, else null
+  default_value  text,
+  sort_order     integer not null default 0,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  unique (form_id, field_key)
+);
+create index if not exists form_fields_form_id_idx on public.form_fields (form_id, sort_order);
+
+-- ── form_responses ──────────────────────────────────────────────
+-- response_data is keyed by field_key, e.g. {"f_1a2b3c4d": "Ahmed Mohamed"}.
+-- Deliberately no foreign key to a "student" — forms are general-purpose, not only for students.
+create table if not exists public.form_responses (
+  id             uuid primary key default gen_random_uuid(),
+  form_id        uuid not null references public.forms (id) on delete cascade,
+  submitted_at   timestamptz not null default now(),
+  response_data  jsonb not null default '{}'::jsonb,
+  created_at     timestamptz not null default now()
+);
+create index if not exists form_responses_form_id_idx on public.form_responses (form_id, created_at desc);
+
+create or replace function public.forms_before_update()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+drop trigger if exists forms_before_update on public.forms;
+create trigger forms_before_update before update on public.forms for each row execute function public.forms_before_update();
+
+create or replace function public.form_fields_before_update()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+drop trigger if exists form_fields_before_update on public.form_fields;
+create trigger form_fields_before_update before update on public.form_fields for each row execute function public.form_fields_before_update();

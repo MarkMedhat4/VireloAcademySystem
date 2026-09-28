@@ -52,9 +52,9 @@ export const SOCIAL = {
   whatsapp: `https://wa.me/${WHATSAPP.international}`,
 } as const;
 
+/** Public navigation only — the admin system is intentionally never linked from public pages. */
 export const NAV_LINKS = [
   { href: "/register", label: "تسجيل طالب" },
   { href: "/payment", label: "الدفع" },
   { href: "/student", label: "دخول الطالب" },
-  { href: "/admin", label: "Admin" },
 ] as const;
