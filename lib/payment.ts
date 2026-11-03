@@ -18,7 +18,7 @@ export interface PaymentInstructions {
 export function getPaymentInstructions(grade: string): PaymentInstructions | null {
   const level = getGradeLevel(grade);
   if (level === "first") {
-    return { price: LESSON_PRICE_EGP, methods: ["InstaPay"], number: "01222803316" };
+    return { price: LESSON_PRICE_EGP, methods: ["InstaPay", "Orange Cash"], number: "01220085313" };
   }
   if (level === "second") {
     return { price: LESSON_PRICE_EGP, methods: ["InstaPay", "Orange Cash"], number: "01220085313" };
